@@ -1,10 +1,6 @@
 name: Steam Deck Stock Checker
 
 on:
-  push:
-    branches: [ main, master ]
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -18,10 +14,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-            python-version: '3.11'
-    
+          python-version: '3.11'
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # Restores and saves last_state.json between workflow runs
+      - name: Restore stock state cache
+        uses: actions/cache@v4
+        with:
+          path: last_state.json
+          key: stock-state-${{ github.run_id }}
+          restore-keys: |
+            stock-state-
 
       - name: Execute stock check
         run: python main.py
