@@ -52,6 +52,7 @@ def check_stock():
 
     if not stock_found:
         print("All refurbished models are out of stock")
+        send_alert(model_name)
 
 if __name__ == "__main__":
     check_stock()
