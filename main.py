@@ -23,7 +23,7 @@ def send_alert(model_name):
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode('utf-8'),
             headers={
-                "Title": "Steam Deck Refurb Restock!"
+                "Title": "Steam Deck Refurb Restock!",
                 "Click": BUY_URL
             },
             timeout=10
