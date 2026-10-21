@@ -2,7 +2,10 @@ import json
 import os
 import requests as rq
 
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "sam_steam_deck_refurb_alerts_99")
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+if not NTFY_TOPIC:
+    raise ValueError("NTFY_TOPIC environment variable is not set!")
+
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
