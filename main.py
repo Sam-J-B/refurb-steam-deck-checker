@@ -78,9 +78,10 @@ def check_stock():
             response = rq.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 api_data = response.json()
-                is_available = api_data.get("response", {}).get("inventory_available", False)
+                #is_available = api_data.get("response", {}).get("inventory_available", False)
 
-is_available=True
+                is_available = True
+
                 current_state[package_id] = is_available
 
                 was_in_stock = previous_state.get(package_id, False)
