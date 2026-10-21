@@ -22,7 +22,6 @@ headers = {
 }
 
 def load_previous_state():
-    """Loads previously tracked stock states from last_state.json."""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r") as f:
