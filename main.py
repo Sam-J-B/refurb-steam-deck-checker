@@ -2,7 +2,8 @@ import json
 import os
 import requests as rq
 
-NTFY_TOPIC = "sam_steam_deck_refurb_alerts_99"
+# Read topic from GitHub Secret environment variable (falls back if running locally)
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "sam_steam_deck_refurb_alerts_99")
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
@@ -81,19 +82,16 @@ def check_stock():
                 is_available = api_data.get("response", {}).get("inventory_available", False)
                 current_state[package_id] = is_available
 
-                # Check state transition using previous run state
                 was_in_stock = previous_state.get(package_id, False)
 
                 if is_available:
                     stock_found = True
                     if not was_in_stock:
-                        # Transition 1: Out of stock -> In stock
                         send_alert(model_name, is_instock=True)
                     else:
                         print(f"[In Stock - Alert Suppressed] {model_name}")
                 else:
                     if was_in_stock:
-                        # Transition 2: In stock -> Out of stock
                         send_alert(model_name, is_instock=False)
                     print(f"[Out of stock] {model_name}")
             else:
