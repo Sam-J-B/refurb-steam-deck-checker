@@ -1,6 +1,8 @@
 name: Steam Deck Stock Checker
 
 on:
+  push:
+    branches: [ main, master ]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
