@@ -2,7 +2,6 @@ import json
 import os
 import requests as rq
 
-# Read topic from GitHub Secret environment variable (falls back if running locally)
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "sam_steam_deck_refurb_alerts_99")
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
@@ -30,7 +29,6 @@ def load_previous_state():
     return {}
 
 def save_current_state(state):
-    """Saves updated stock states to last_state.json."""
     try:
         with open(STATE_FILE, "w") as f:
             json.dump(state, f, indent=4)
@@ -38,7 +36,6 @@ def save_current_state(state):
         print(f"Error saving state file: {e}")
 
 def send_alert(model_name, is_instock=True):
-    """Sends a push notification to ntfy.sh for both restocks and sell-outs."""
     if is_instock:
         message = f"{model_name} is in stock!"
         title = "Steam Deck Refurb Restock!"
