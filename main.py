@@ -10,26 +10,25 @@ DECK_MODELS = {
     "1202547": "Refurbished 1TB OLED",
 }
 
-headers - {
+headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
 def send_alert(model_name):
-    
     message = f"{model_name} is in stock"
     print(message)
 
     try:
         rq.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
+            data=message.encode('utf-8'),
             headers={
                 "Title": "Steam Deck Refurb Restock!"
                 "Click": BUY_URL
             },
             timeout=10
         )
-    except Exception as e;
+    except Exception as e:
         print(f"ntfy error: {e}")
 
 def check_stock():
@@ -40,8 +39,8 @@ def check_stock():
         try:
             response = rq.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
-                data.response_json()
-                is_available = data.get("response", {}).get("inventory_available", False)
+                api_data = response.json()
+                is_available = api_data.get("response", {}).get("inventory_available", False)
 
                 if is_available:
                     stock_found = True
