@@ -36,9 +36,19 @@ def save_current_state(state):
     except Exception as e:
         print(f"Error saving state file: {e}")
 
-def send_alert(model_name):
-    """Sends a push notification to ntfy.sh."""
-    message = f"{model_name} is in stock!"
+def send_alert(model_name, is_instock=True):
+    """Sends a push notification to ntfy.sh for both restocks and sell-outs."""
+    if is_instock:
+        message = f"{model_name} is in stock!"
+        title = "Steam Deck Refurb Restock!"
+        priority = "high"
+        tags = "tada,steamdeck"
+    else:
+        message = f"{model_name} has just gone out of stock."
+        title = "Steam Deck Sold Out"
+        priority = "low"
+        tags = "x,steamdeck"
+
     print(f"[ALERT SENT] {message}")
 
     try:
@@ -46,10 +56,10 @@ def send_alert(model_name):
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode("utf-8"),
             headers={
-                "Title": "Steam Deck Refurb Restock!",
+                "Title": title,
                 "Click": BUY_URL,
-                "Priority": "high",
-                "Tags": "tada,steamdeck"
+                "Priority": priority,
+                "Tags": tags
             },
             timeout=10
         )
@@ -71,15 +81,20 @@ def check_stock():
                 is_available = api_data.get("response", {}).get("inventory_available", False)
                 current_state[package_id] = is_available
 
+                # Check state transition using previous run state
+                was_in_stock = previous_state.get(package_id, False)
+
                 if is_available:
                     stock_found = True
-                    # Only alert if it was NOT in stock during the previous run
-                    was_in_stock = previous_state.get(package_id, False)
                     if not was_in_stock:
-                        send_alert(model_name)
+                        # Transition 1: Out of stock -> In stock
+                        send_alert(model_name, is_instock=True)
                     else:
                         print(f"[In Stock - Alert Suppressed] {model_name}")
                 else:
+                    if was_in_stock:
+                        # Transition 2: In stock -> Out of stock
+                        send_alert(model_name, is_instock=False)
                     print(f"[Out of stock] {model_name}")
             else:
                 print(f"API Error {response.status_code} for {model_name}")
