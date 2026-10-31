@@ -6,15 +6,13 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 if not NTFY_TOPIC:
     raise ValueError("NTFY_TOPIC environment variable is not set!")
 
-BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
+# Swapped to the Portal store page
+BUY_URL = "https://store.steampowered.com/app/400/Portal/"
 STATE_FILE = "last_state.json"
 
+# Swapped to the Portal package ID
 DECK_MODELS = {
-    "903905": "Refurbished 64GB LCD",
-    "903906": "Refurbished 256GB LCD",
-    "903907": "Refurbished 512GB LCD",
-    "1202542": "Refurbished 512GB OLED",
-    "1202547": "Refurbished 1TB OLED",
+    "79": "TEST: Portal Digital Game",
 }
 
 headers = {
@@ -86,7 +84,6 @@ def send_error_alert(error_message):
 def check_stock_html():
     previous_state = load_previous_state()
     
-    # Clone previous state to preserve stock data during an error loop
     current_state = previous_state.copy() 
     stock_found = False
 
@@ -97,7 +94,6 @@ def check_stock_html():
             error_msg = f"Failed to fetch store page. HTTP Status: {response.status_code}"
             print(error_msg)
             
-            # Only send alert if we weren't already in an error state
             if not previous_state.get("in_error_state", False):
                 send_error_alert(error_msg)
             
@@ -106,8 +102,6 @@ def check_stock_html():
             return
 
         html = response.text
-
-        # If we made it here, the page loaded successfully. Clear the error state.
         current_state["in_error_state"] = False
 
         for package_id, model_name in DECK_MODELS.items():
@@ -130,8 +124,6 @@ def check_stock_html():
                 else:
                     print(f"[In Stock - Alert Suppressed] {model_name}")
             else:
-                # To prevent false "Sold Out" alerts if previous state was missing
-                # only alert if we specifically knew it was in stock before
                 if was_in_stock:
                     send_alert(model_name, is_instock=False)
                 print(f"[Out of stock] {model_name}")
