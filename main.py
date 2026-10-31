@@ -19,8 +19,7 @@ DECK_MODELS = {
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://store.steampowered.com/sale/steamdeckrefurbished"
+    "Accept": "application/json",
 }
 
 def load_previous_state():
@@ -74,16 +73,17 @@ def check_stock():
     stock_found = False
 
     for package_id, model_name in DECK_MODELS.items():
-        # Storefront AJAX endpoint
-        url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&cc=GB"
+        # Steam Item Details API Endpoint
+        url = f"https://store.steampowered.com/api/itemdetails/?packageids={package_id}&cc=GB&l=english"
 
         try:
             response = rq.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 api_data = response.json()
                 
-                # Check for active purchasing flags in storefront response
-                is_available = api_data.get("bPurchasable", False) or api_data.get("bInStock", False)
+                # Extract inventory availability from package details
+                pkg_info = api_data.get(package_id, {})
+                is_available = pkg_info.get("can_purchase", False) or pkg_info.get("in_stock", False)
 
                 current_state[package_id] = is_available
                 was_in_stock = previous_state.get(package_id, False)
