@@ -1,16 +1,16 @@
 import json
 import os
+import re
 import requests as rq
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 if not NTFY_TOPIC:
     raise ValueError("NTFY_TOPIC environment variable is not set!")
 
-# Swapped to the Portal store page
+# Portal test page
 BUY_URL = "https://store.steampowered.com/app/400/Portal/"
 STATE_FILE = "last_state.json"
 
-# Swapped to the Portal package ID
 DECK_MODELS = {
     "79": "TEST: Portal Digital Game",
 }
@@ -83,7 +83,6 @@ def send_error_alert(error_message):
 
 def check_stock_html():
     previous_state = load_previous_state()
-    
     current_state = previous_state.copy() 
     stock_found = False
 
@@ -107,11 +106,22 @@ def check_stock_html():
         for package_id, model_name in DECK_MODELS.items():
             is_available = False
             
-            if f'packageid="{package_id}"' in html or f"packageid='{package_id}'" in html or f'data-ds-packageid="{package_id}"' in html:
+            # Find the package ID anywhere in the HTML
+            if package_id in html:
                 idx = html.find(package_id)
-                snippet = html[max(0, idx - 200): min(len(html), idx + 500)]
+                # Expand window to 2500 chars to cover full purchase container blocks
+                snippet = html[max(0, idx - 500): min(len(html), idx + 2000)]
                 
-                if "btn_add_to_cart" in snippet or "Add to Cart" in snippet:
+                # Check for any valid Steam add-to-cart class or button text
+                has_cart_button = any(term in snippet for term in [
+                    "btn_add_to_cart", 
+                    "add_to_cart", 
+                    "btn_green_steamui", 
+                    "Add to Cart",
+                    "btn_addtocart"
+                ])
+                
+                if has_cart_button:
                     is_available = True
 
             current_state[package_id] = is_available
