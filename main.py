@@ -106,13 +106,13 @@ def check_stock_html():
         for package_id, model_name in DECK_MODELS.items():
             is_available = False
             
-            # Find the package ID anywhere in the HTML
-            if package_id in html:
-                idx = html.find(package_id)
-                # Expand window to 2500 chars to cover full purchase container blocks
+            # Find EVERY instance of the package ID in the HTML as a standalone word
+            matches = [m.start() for m in re.finditer(r'\b' + package_id + r'\b', html)]
+            
+            for idx in matches:
+                # Grab surrounding HTML for each match and look for cart elements
                 snippet = html[max(0, idx - 500): min(len(html), idx + 2000)]
                 
-                # Check for any valid Steam add-to-cart class or button text
                 has_cart_button = any(term in snippet for term in [
                     "btn_add_to_cart", 
                     "add_to_cart", 
@@ -123,6 +123,7 @@ def check_stock_html():
                 
                 if has_cart_button:
                     is_available = True
+                    break # We found the actual purchase block, stop searching
 
             current_state[package_id] = is_available
             was_in_stock = previous_state.get(package_id, False)
