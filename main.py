@@ -18,7 +18,9 @@ DECK_MODELS = {
 }
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://store.steampowered.com/sale/steamdeckrefurbished"
 }
 
 def load_previous_state():
@@ -72,7 +74,7 @@ def check_stock():
     stock_found = False
 
     for package_id, model_name in DECK_MODELS.items():
-        url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?packageid={package_id}&country_code=GB"
+       url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https:%2F%2Fstore.steampowered.com&packageid={package_id}&country_code=GB"
 
         try:
             response = rq.get(url, headers=headers, timeout=10)
