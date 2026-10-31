@@ -6,15 +6,13 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 if not NTFY_TOPIC:
     raise ValueError("NTFY_TOPIC environment variable is not set!")
 
-BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
+# 1. Swapped the URL to the main standard Steam Deck store page
+BUY_URL = "https://store.steampowered.com/steamdeck"
 STATE_FILE = "last_state.json"
 
+# 2. Swapped to a standard, currently IN-STOCK Steam Deck package ID
 DECK_MODELS = {
-    "903905": "Refurbished 64GB LCD",
-    "903906": "Refurbished 256GB LCD",
-    "903907": "Refurbished 512GB LCD",
-    "1202542": "Refurbished 512GB OLED",
-    "1202547": "Refurbished 1TB OLED",
+    "946114": "TEST: Standard 1TB OLED",
 }
 
 headers = {
@@ -41,7 +39,7 @@ def save_current_state(state):
 def send_alert(model_name, is_instock=True):
     if is_instock:
         message = f"{model_name} is in stock!"
-        title = "Steam Deck Refurb Restock!"
+        title = "Steam Deck Test Restock!"
         priority = "high"
         tags = "tada,steamdeck"
     else:
@@ -78,7 +76,6 @@ def check_stock_html():
         
         if response.status_code != 200:
             print(f"Failed to fetch store page. HTTP Status: {response.status_code}")
-            # Save previous state so we don't accidentally trigger false alerts on a bad request
             save_current_state(previous_state)
             return
 
@@ -90,7 +87,6 @@ def check_stock_html():
             # Locate the package ID in the webpage HTML
             if f'packageid="{package_id}"' in html or f"packageid='{package_id}'" in html or f'data-ds-packageid="{package_id}"' in html:
                 idx = html.find(package_id)
-                # Grab the chunk of HTML surrounding the package ID to check for the cart button
                 snippet = html[max(0, idx - 200): min(len(html), idx + 500)]
                 
                 if "btn_add_to_cart" in snippet or "Add to Cart" in snippet:
