@@ -67,30 +67,54 @@ def send_alert(model_name, is_instock=True):
     except Exception as e:
         print(f"ntfy error: {e}")
 
+def send_error_alert(error_message):
+    print(f"[ERROR ALERT SENT] {error_message}")
+    try:
+        rq.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=error_message.encode("utf-8"),
+            headers={
+                "Title": "Script Error: Steam Deck Checker",
+                "Priority": "high",
+                "Tags": "warning"
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f"ntfy error: {e}")
+
 def check_stock_html():
     previous_state = load_previous_state()
-    current_state = {}
+    
+    # Clone previous state to preserve stock data during an error loop
+    current_state = previous_state.copy() 
     stock_found = False
 
     try:
-        # Request page directly with cookies to bypass age gates/session blocks
         response = rq.get(BUY_URL, headers=headers, cookies={"birthtime": "0", "lastvisit": "0"}, timeout=15)
         
         if response.status_code != 200:
-            print(f"Failed to fetch store page. HTTP Status: {response.status_code}")
-            # Save previous state so we don't accidentally trigger false alerts on a bad request
-            save_current_state(previous_state)
+            error_msg = f"Failed to fetch store page. HTTP Status: {response.status_code}"
+            print(error_msg)
+            
+            # Only send alert if we weren't already in an error state
+            if not previous_state.get("in_error_state", False):
+                send_error_alert(error_msg)
+            
+            current_state["in_error_state"] = True
+            save_current_state(current_state)
             return
 
         html = response.text
 
+        # If we made it here, the page loaded successfully. Clear the error state.
+        current_state["in_error_state"] = False
+
         for package_id, model_name in DECK_MODELS.items():
             is_available = False
             
-            # Locate the package ID in the webpage HTML
             if f'packageid="{package_id}"' in html or f"packageid='{package_id}'" in html or f'data-ds-packageid="{package_id}"' in html:
                 idx = html.find(package_id)
-                # Grab the chunk of HTML surrounding the package ID to check for the cart button
                 snippet = html[max(0, idx - 200): min(len(html), idx + 500)]
                 
                 if "btn_add_to_cart" in snippet or "Add to Cart" in snippet:
@@ -106,6 +130,8 @@ def check_stock_html():
                 else:
                     print(f"[In Stock - Alert Suppressed] {model_name}")
             else:
+                # To prevent false "Sold Out" alerts if previous state was missing
+                # only alert if we specifically knew it was in stock before
                 if was_in_stock:
                     send_alert(model_name, is_instock=False)
                 print(f"[Out of stock] {model_name}")
@@ -116,8 +142,14 @@ def check_stock_html():
         save_current_state(current_state)
 
     except Exception as e:
-        print(f"Error parsing Steam page: {e}")
-        save_current_state(previous_state)
+        error_msg = f"Exception parsing Steam page: {e}"
+        print(error_msg)
+        
+        if not previous_state.get("in_error_state", False):
+            send_error_alert(error_msg)
+        
+        current_state["in_error_state"] = True
+        save_current_state(current_state)
 
 if __name__ == "__main__":
     check_stock_html()
