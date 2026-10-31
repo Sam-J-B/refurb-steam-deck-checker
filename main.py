@@ -74,14 +74,16 @@ def check_stock():
     stock_found = False
 
     for package_id, model_name in DECK_MODELS.items():
-        # Pass origin parameter directly unencoded
-        url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https://store.steampowered.com&packageid={package_id}&country_code=GB"
+        # Storefront AJAX endpoint
+        url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&cc=GB"
 
         try:
             response = rq.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 api_data = response.json()
-                is_available = api_data.get("response", {}).get("inventory_available", False)
+                
+                # Check for active purchasing flags in storefront response
+                is_available = api_data.get("bPurchasable", False) or api_data.get("bInStock", False)
 
                 current_state[package_id] = is_available
                 was_in_stock = previous_state.get(package_id, False)
