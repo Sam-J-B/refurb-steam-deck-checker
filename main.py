@@ -74,7 +74,7 @@ def check_stock():
     stock_found = False
 
     for package_id, model_name in DECK_MODELS.items():
-       url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https:%2F%2Fstore.steampowered.com&packageid={package_id}&country_code=GB"
+        url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https:%2F%2Fstore.steampowered.com&packageid={package_id}&country_code=GB"
 
         try:
             response = rq.get(url, headers=headers, timeout=10)
