@@ -18,8 +18,8 @@ DECK_MODELS = {
 }
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
 def load_previous_state():
@@ -67,48 +67,57 @@ def send_alert(model_name, is_instock=True):
     except Exception as e:
         print(f"ntfy error: {e}")
 
-def check_stock():
+def check_stock_html():
     previous_state = load_previous_state()
     current_state = {}
     stock_found = False
 
-    for package_id, model_name in DECK_MODELS.items():
-        # Steam Item Details API Endpoint
-        url = f"https://store.steampowered.com/api/itemdetails/?packageids={package_id}&cc=GB&l=english"
+    try:
+        # Request page directly with cookies to bypass age gates/session blocks
+        response = rq.get(BUY_URL, headers=headers, cookies={"birthtime": "0", "lastvisit": "0"}, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"Failed to fetch store page. HTTP Status: {response.status_code}")
+            # Save previous state so we don't accidentally trigger false alerts on a bad request
+            save_current_state(previous_state)
+            return
 
-        try:
-            response = rq.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                api_data = response.json()
+        html = response.text
+
+        for package_id, model_name in DECK_MODELS.items():
+            is_available = False
+            
+            # Locate the package ID in the webpage HTML
+            if f'packageid="{package_id}"' in html or f"packageid='{package_id}'" in html or f'data-ds-packageid="{package_id}"' in html:
+                idx = html.find(package_id)
+                # Grab the chunk of HTML surrounding the package ID to check for the cart button
+                snippet = html[max(0, idx - 200): min(len(html), idx + 500)]
                 
-                # Extract inventory availability from package details
-                pkg_info = api_data.get(package_id, {})
-                is_available = pkg_info.get("can_purchase", False) or pkg_info.get("in_stock", False)
+                if "btn_add_to_cart" in snippet or "Add to Cart" in snippet:
+                    is_available = True
 
-                current_state[package_id] = is_available
-                was_in_stock = previous_state.get(package_id, False)
+            current_state[package_id] = is_available
+            was_in_stock = previous_state.get(package_id, False)
 
-                if is_available:
-                    stock_found = True
-                    if not was_in_stock:
-                        send_alert(model_name, is_instock=True)
-                    else:
-                        print(f"[In Stock - Alert Suppressed] {model_name}")
+            if is_available:
+                stock_found = True
+                if not was_in_stock:
+                    send_alert(model_name, is_instock=True)
                 else:
-                    if was_in_stock:
-                        send_alert(model_name, is_instock=False)
-                    print(f"[Out of stock] {model_name}")
+                    print(f"[In Stock - Alert Suppressed] {model_name}")
             else:
-                print(f"API Error {response.status_code} for {model_name}")
-                current_state[package_id] = previous_state.get(package_id, False)
-        except Exception as e:
-            print(f"Error checking {model_name}: {e}")
-            current_state[package_id] = previous_state.get(package_id, False)
+                if was_in_stock:
+                    send_alert(model_name, is_instock=False)
+                print(f"[Out of stock] {model_name}")
 
-    if not stock_found:
-        print("All refurbished models are out of stock")
+        if not stock_found:
+            print("All refurbished models are out of stock")
 
-    save_current_state(current_state)
+        save_current_state(current_state)
+
+    except Exception as e:
+        print(f"Error parsing Steam page: {e}")
+        save_current_state(previous_state)
 
 if __name__ == "__main__":
-    check_stock()
+    check_stock_html()
