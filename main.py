@@ -87,42 +87,26 @@ def check_stock():
     previous_state = load_previous_state()
     current_state = previous_state.copy()
     stock_found = False
+    all_checks_successful = True
 
-    # Batch request all package IDs in a single query
-    package_ids_str = ",".join(DECK_MODELS.keys())
-    api_url = f"https://store.steampowered.com/api/packagedetails?packageids={package_ids_str}&cc=gb&l=english"
-
-    try:
-        response = rq.get(api_url, headers=headers, timeout=15)
+    for package_id, model_name in DECK_MODELS.items():
+        # Query packagedetails per individual package ID
+        api_url = f"https://store.steampowered.com/api/packagedetails?packageids={package_id}&cc=gb&l=english"
         
-        if response.status_code != 200:
-            error_msg = f"Steam API HTTP status {response.status_code}"
-            print(error_msg)
-            if not previous_state.get("in_error_state", False):
-                send_error_alert(error_msg)
-            current_state["in_error_state"] = True
-            save_current_state(current_state)
-            return
-
         try:
+            response = rq.get(api_url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                print(f"[HTTP ERROR {response.status_code}] {model_name}")
+                all_checks_successful = False
+                continue
+
             api_data = response.json()
-        except json.JSONDecodeError:
-            error_msg = f"Failed to parse JSON response from packagedetails. Raw text: {repr(response.text[:150])}"
-            print(error_msg)
-            if not previous_state.get("in_error_state", False):
-                send_error_alert(error_msg)
-            current_state["in_error_state"] = True
-            save_current_state(current_state)
-            return
-
-        current_state["in_error_state"] = False
-
-        for package_id, model_name in DECK_MODELS.items():
             pkg_info = api_data.get(package_id, {})
             is_available = False
 
             if pkg_info.get("success") and "data" in pkg_info:
                 data = pkg_info["data"]
+                # Evaluate public purchasing availability
                 is_available = bool(data.get("can_purchase", False))
 
             current_state[package_id] = is_available
@@ -139,18 +123,21 @@ def check_stock():
                     send_alert(model_name, is_instock=False)
                 print(f"[Out of stock] {model_name}")
 
-        if not stock_found:
-            print("All refurbished models are out of stock")
+        except Exception as e:
+            print(f"[EXCEPTION] Failed checking {model_name}: {e}")
+            all_checks_successful = False
 
-        save_current_state(current_state)
-
-    except Exception as e:
-        error_msg = f"Exception checking Steam stock: {e}"
-        print(error_msg)
+    if not all_checks_successful:
+        error_msg = "Steam API returned non-200 status or unparseable payloads."
         if not previous_state.get("in_error_state", False):
             send_error_alert(error_msg)
         current_state["in_error_state"] = True
-        save_current_state(current_state)
+    else:
+        current_state["in_error_state"] = False
+        if not stock_found:
+            print("All refurbished models are out of stock")
+
+    save_current_state(current_state)
 
 if __name__ == "__main__":
     check_stock()
