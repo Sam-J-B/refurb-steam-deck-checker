@@ -90,7 +90,6 @@ def check_stock():
     all_checks_successful = True
 
     for package_id, model_name in DECK_MODELS.items():
-        # Query packagedetails per individual package ID
         api_url = f"https://store.steampowered.com/api/packagedetails?packageids={package_id}&cc=gb&l=english"
         
         try:
@@ -106,8 +105,16 @@ def check_stock():
 
             if pkg_info.get("success") and "data" in pkg_info:
                 data = pkg_info["data"]
-                # Evaluate public purchasing availability
-                is_available = bool(data.get("can_purchase", False))
+                name_in_api = data.get("name", "Unknown Package")
+                can_purchase = data.get("can_purchase", False)
+                
+                # Expose raw payload details directly in the runner log
+                print(f"[STEAM VERIFIED] ID: {package_id} | Name: '{name_in_api}' | can_purchase: {can_purchase}")
+                
+                is_available = bool(can_purchase)
+            else:
+                print(f"[API RESPONSE FAILED] ID: {package_id} | success: {pkg_info.get('success')} | Raw: {pkg_info}")
+                all_checks_successful = False
 
             current_state[package_id] = is_available
             was_in_stock = previous_state.get(package_id, False)
@@ -121,10 +128,10 @@ def check_stock():
             else:
                 if was_in_stock:
                     send_alert(model_name, is_instock=False)
-                print(f"[Out of stock] {model_name}")
+                print(f"[Out of stock] {model_name}\n")
 
         except Exception as e:
-            print(f"[EXCEPTION] Failed checking {model_name}: {e}")
+            print(f"[EXCEPTION] Failed checking {model_name}: {e}\n")
             all_checks_successful = False
 
     if not all_checks_successful:
