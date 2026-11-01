@@ -10,16 +10,15 @@ BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
 DECK_MODELS = {
+    # Test item (Physical hardware, currently in stock in the UK)
+    "761892": "TEST: Steam Deck Docking Station",
+    
+    # Live Refurbished Deck IDs
     "903905": "Refurbished 64GB LCD",
     "903906": "Refurbished 256GB LCD",
     "903907": "Refurbished 512GB LCD",
     "1202542": "Refurbished 512GB OLED",
     "1202547": "Refurbished 1TB OLED",
-}
-
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Accept": "application/json",
 }
 
 def load_previous_state():
@@ -90,11 +89,13 @@ def check_stock():
     all_checks_successful = True
 
     for package_id, model_name in DECK_MODELS.items():
-        # The ultimate un-walled endpoint for physical hardware inventory
-        api_url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?country_code=GB&packageid={package_id}"
+        # Added the critical `origin` parameter required by Steam's API gateway to bypass the 404
+        api_url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https:%2F%2Fstore.steampowered.com&country_code=GB&packageid={package_id}"
         
         try:
-            response = rq.get(api_url, headers=headers, timeout=10)
+            # Headers removed to match known working Python signatures for this endpoint
+            response = rq.get(api_url, timeout=10)
+            
             if response.status_code != 200:
                 print(f"[HTTP ERROR {response.status_code}] {model_name}")
                 all_checks_successful = False
@@ -119,10 +120,10 @@ def check_stock():
             else:
                 if was_in_stock:
                     send_alert(model_name, is_instock=False)
-                print(f"[Out of stock] {model_name}\n")
+                print(f"[Out of stock] {model_name}")
 
         except Exception as e:
-            print(f"[EXCEPTION] Failed checking {model_name}: {e}\n")
+            print(f"[EXCEPTION] Failed checking {model_name}: {e}")
             all_checks_successful = False
 
     if not all_checks_successful:
@@ -133,7 +134,7 @@ def check_stock():
     else:
         current_state["in_error_state"] = False
         if not stock_found:
-            print("All refurbished models are out of stock")
+            print("\nAll refurbished models are out of stock")
 
     save_current_state(current_state)
 
