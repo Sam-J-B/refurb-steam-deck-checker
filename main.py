@@ -87,7 +87,7 @@ def check_stock():
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
+        "Accept-Language": "en-US,en;q=0.9",
         "Referer": BUY_URL
     })
     session.cookies.update({
@@ -97,16 +97,27 @@ def check_stock():
     })
 
     try:
+        # Step 1: Warm up the session to acquire Steam's sessionid and browserid cookies
+        init_res = session.get(BUY_URL, params={"cc": "gb", "l": "english"}, timeout=15)
+        if init_res.status_code != 200:
+            error_msg = f"Failed to initialize Steam session. HTTP Status: {init_res.status_code}"
+            print(error_msg)
+            if not previous_state.get("in_error_state", False):
+                send_error_alert(error_msg)
+            current_state["in_error_state"] = True
+            save_current_state(current_state)
+            return
+
         all_checks_successful = True
 
+        # Step 2: Query stock status with active session cookies
         for package_id, model_name in DECK_MODELS.items():
             api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&cc=GB"
             
             response = session.get(api_url, timeout=10)
-            if response.status_code == 200:
+            if response.status_code == 200 and response.text.strip():
                 try:
                     data = response.json()
-                    # Check purchasable and in-stock boolean flags
                     is_available = bool(
                         data.get("bPurchasable", False) or 
                         data.get("bInStock", False) or 
@@ -129,14 +140,14 @@ def check_stock():
                         print(f"[Out of stock] {model_name}")
 
                 except json.JSONDecodeError:
-                    print(f"[API ERROR] Failed to parse JSON for {model_name}")
+                    print(f"[API ERROR] Raw response for {model_name}: {repr(response.text[:150])}")
                     all_checks_successful = False
             else:
-                print(f"[HTTP ERROR {response.status_code}] {model_name}")
+                print(f"[HTTP/EMPTY ERROR] Status {response.status_code} for {model_name}. Body: {repr(response.text[:150])}")
                 all_checks_successful = False
 
         if not all_checks_successful:
-            error_msg = "Steam API returned non-200 responses or invalid JSON payloads."
+            error_msg = "Steam API returned empty or non-JSON payloads."
             if not previous_state.get("in_error_state", False):
                 send_error_alert(error_msg)
             current_state["in_error_state"] = True
