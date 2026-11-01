@@ -1,66 +1,79 @@
+import json
+import urllib.parse
 import requests as rq
-import time
 
-# 2550670 = Refurbished Steam Deck
-# 400 = Portal
-APP_IDS = [2550670, 400]
+# Portal 2 (7877) and Refurb 64GB LCD (903905)
+PACKAGE_IDS = [7877, 903905]
 
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json"
-}
-
-def check_appdetails():
-    for app_id in APP_IDS:
-        api_url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&cc=gb"
-        print(f"Fetching {api_url}...\n")
+def check_store_browse_api():
+    url = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1"
+    
+    # We construct the exact JSON payload the React frontend requests
+    input_dict = {
+        "context": {
+            "language": "english",
+            "country_code": "GB",
+            "steam_realm": 1
+        },
+        "data_request": {
+            "include_assets": False,
+            "include_release": False,
+            "include_platforms": False,
+            "include_all_purchase_options": True,
+            "include_screenshots": False,
+            "include_trailers": False,
+            "include_ratings": False,
+            "include_tag_count": 0,
+            "include_reviews": False,
+            "include_basic_info": True,
+            "include_supported_languages": False,
+            "include_full_description": False,
+            "include_included_items": False
+        },
+        "ids": [{"packageid": pid} for pid in PACKAGE_IDS]
+    }
+    
+    params = {
+        "input_json": json.dumps(input_dict)
+    }
+    
+    print(f"Requesting: {url}\n")
+    
+    try:
+        res = rq.get(url, params=params, timeout=15)
         
-        try:
-            res = rq.get(api_url, headers=headers, timeout=15)
-            if res.status_code != 200:
-                print(f"HTTP ERROR {res.status_code} for App ID {app_id}\n")
+        if res.status_code != 200:
+            print(f"HTTP Error: {res.status_code}")
+            print(res.text[:200])
+            return
+            
+        data = res.json()
+        store_items = data.get("response", {}).get("store_items", [])
+        
+        if not store_items:
+            print("[EMPTY] No store items returned.")
+            print(f"Raw response: {data}")
+            return
+            
+        for item in store_items:
+            name = item.get("name", "Unknown")
+            pid = item.get("id")
+            print(f"{'='*50}\nID: {pid} | {name}\n{'='*50}")
+            
+            purchase_options = item.get("purchase_options", [])
+            if not purchase_options:
+                print("  [NO PURCHASE OPTIONS] (Often means out of stock/delisted)")
                 continue
                 
-            data = res.json()
-            app_info = data.get(str(app_id), {})
-            
-            print(f"{'='*50}")
-            print(f"APP ID: {app_id}")
-            print(f"{'='*50}")
-            
-            if not app_info.get("success"):
-                print("  [STATUS] success: False\n")
-                continue
-                
-            app_data = app_info.get("data", {})
-            print(f"  Name: {app_data.get('name')}")
-            
-            groups = app_data.get("package_groups", [])
-            if not groups:
-                print("  [INVENTORY] No package groups found (Item unavailable).\n")
-                continue
-                
-            for group in groups:
-                print(f"  -> Group: {group.get('name', 'N/A')}")
-                subs = group.get("subs", [])
-                
-                if not subs:
-                    print("     [EMPTY] No active packages (Sub IDs) available in this group.")
-                
-                for sub in subs:
-                    pkg_id = sub.get("packageid")
-                    print(f"\n     * ACTIVE SUB ID: {pkg_id}")
-                    
-                    for k, v in sub.items():
-                        if k not in ["packageid", "option_description", "option_text"]:
-                            print(f"       - {k}: {v}")
+            for i, opt in enumerate(purchase_options):
+                print(f"\n  -- Purchase Option #{i+1} --")
+                # Expose every single raw boolean/integer attached to the purchase option
+                for k, v in opt.items():
+                    print(f"     {k}: {v}")
             print("\n")
             
-        except Exception as e:
-            print(f"Error checking {app_id}: {e}\n")
-            
-        # Brief pause to avoid rate limiting
-        time.sleep(1)
+    except Exception as e:
+        print(f"Exception: {e}")
 
 if __name__ == "__main__":
-    check_appdetails()
+    check_store_browse_api()
