@@ -1,172 +1,60 @@
-import json
-import os
 import requests as rq
 
-NTFY_TOPIC = os.getenv("NTFY_TOPIC")
-if not NTFY_TOPIC:
-    raise ValueError("NTFY_TOPIC environment variable is not set!")
+# 2550670 = Refurbished Steam Deck (Master App ID)
+# 400 = Portal (Test App ID)
+API_URL = "https://store.steampowered.com/api/appdetails?appids=2550670,400&cc=gb"
 
-BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
-STATE_FILE = "last_state.json"
-
-DECK_MODELS = {
-    # Test item (Always in stock)
-    "7877": "TEST: Portal 2",
-
-    # Refurbished Deck Package IDs
-    "903905": "Refurbished 64GB LCD",
-    "903906": "Refurbished 256GB LCD",
-    "903907": "Refurbished 512GB LCD",
-    "1202542": "Refurbished 512GB OLED",
-    "1202547": "Refurbished 1TB OLED",
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept": "application/json"
 }
 
-def load_previous_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading state file: {e}")
-    return {}
-
-def save_current_state(state):
+def check_appdetails():
+    print(f"Fetching {API_URL}...\n")
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=4)
-    except Exception as e:
-        print(f"Error saving state file: {e}")
-
-def send_alert(model_name, is_instock=True):
-    if is_instock:
-        message = f"{model_name} is in stock!"
-        title = "Steam Deck Refurb Restock!"
-        priority = "high"
-        tags = "tada,steamdeck"
-    else:
-        message = f"{model_name} has just gone out of stock."
-        title = "Steam Deck Sold Out"
-        priority = "low"
-        tags = "x,steamdeck"
-
-    print(f"[ALERT SENT] {message}")
-
-    try:
-        rq.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
-            headers={
-                "Title": title,
-                "Click": BUY_URL,
-                "Priority": priority,
-                "Tags": tags
-            },
-            timeout=10
-        )
-    except Exception as e:
-        print(f"ntfy error: {e}")
-
-def send_error_alert(error_message):
-    print(f"[ERROR ALERT SENT] {error_message}")
-    try:
-        rq.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=error_message.encode("utf-8"),
-            headers={
-                "Title": "Script Error: Steam Deck Checker",
-                "Priority": "high",
-                "Tags": "warning"
-            },
-            timeout=10
-        )
-    except Exception as e:
-        print(f"ntfy error: {e}")
-
-def check_stock():
-    previous_state = load_previous_state()
-    current_state = previous_state.copy()
-    stock_found = False
-    all_checks_successful = True
-
-    session = rq.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Referer": BUY_URL,
-        "X-Requested-With": "XMLHttpRequest"
-    })
-
-    try:
-        # Step 1: Warm up session and extract sessionid cookie
-        init_res = session.get(BUY_URL, params={"cc": "gb", "l": "english"}, cookies={"birthtime": "0", "steamCountry": "GB%7C"}, timeout=15)
+        res = rq.get(API_URL, headers=headers, timeout=15)
+        if res.status_code != 200:
+            print(f"HTTP ERROR: {res.status_code}")
+            return
+            
+        data = res.json()
         
-        sessionid = session.cookies.get("sessionid")
-        if not sessionid:
-            # Fallback cookie retrieval
-            sessionid = session.cookies.get_dict().get("sessionid", "")
-
-        print(f"[SESSION INITIALIZED] sessionid: {sessionid[:8]}...")
-
-        # Step 2: Check each package ID with the session token
-        for package_id, model_name in DECK_MODELS.items():
-            api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&sessionid={sessionid}&cc=GB&l=english"
+        for app_id, app_info in data.items():
+            print(f"{'='*50}")
+            print(f"APP ID: {app_id}")
+            print(f"{'='*50}")
             
-            response = session.get(api_url, timeout=10)
+            if not app_info.get("success"):
+                print("  [STATUS] success: False\n")
+                continue
+                
+            app_data = app_info.get("data", {})
+            print(f"  Name: {app_data.get('name')}")
             
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    raw_text = response.text
+            groups = app_data.get("package_groups", [])
+            if not groups:
+                print("  [INVENTORY] No package groups found (Item unavailable).\n")
+                continue
+                
+            for group in groups:
+                print(f"  -> Group: {group.get('name', 'N/A')}")
+                subs = group.get("subs", [])
+                
+                if not subs:
+                    print("     [EMPTY] No active packages (Sub IDs) available in this group.")
+                
+                for sub in subs:
+                    pkg_id = sub.get("packageid")
+                    print(f"\n     * ACTIVE SUB ID: {pkg_id}")
                     
-                    # Look for explicit boolean flags or Add to Cart HTML buttons in the response payload
-                    b_purchasable = data.get("bPurchasable", False)
-                    b_in_stock = data.get("bInStock", False)
-                    has_cart_btn = "btn_add_to_cart" in raw_text or "Add to Cart" in raw_text
-
-                    is_available = bool(b_purchasable or b_in_stock or has_cart_btn)
-
-                    print(f"[AJAX RESPONSE] ID: {package_id} ({model_name}) | bPurchasable: {b_purchasable} | bInStock: {b_in_stock} | has_cart_btn: {has_cart_btn}")
-
-                    current_state[package_id] = is_available
-                    was_in_stock = previous_state.get(package_id, False)
-
-                    if is_available:
-                        stock_found = True
-                        if not was_in_stock:
-                            send_alert(model_name, is_instock=True)
-                        else:
-                            print(f"[In Stock - Alert Suppressed] {model_name}")
-                    else:
-                        if was_in_stock:
-                            send_alert(model_name, is_instock=False)
-                        print(f"[Out of stock] {model_name}")
-
-                except json.JSONDecodeError:
-                    print(f"[JSON ERROR] Failed to parse payload for {model_name}. Snippet: {repr(response.text[:100])}")
-                    all_checks_successful = False
-            else:
-                print(f"[HTTP ERROR {response.status_code}] {model_name}")
-                all_checks_successful = False
-
-        if not all_checks_successful:
-            error_msg = "Steam AJAX returned bad status codes or unparseable payloads."
-            if not previous_state.get("in_error_state", False):
-                send_error_alert(error_msg)
-            current_state["in_error_state"] = True
-        else:
-            current_state["in_error_state"] = False
-            if not stock_found:
-                print("All refurbished models are out of stock")
-
-        save_current_state(current_state)
-
+                    # Print all keys attached to this active package to see if a stock flag exists
+                    for k, v in sub.items():
+                        if k not in ["packageid", "option_description", "option_text"]:
+                            print(f"       - {k}: {v}")
+            print("\n")
+            
     except Exception as e:
-        error_msg = f"Exception checking Steam stock: {e}"
-        print(error_msg)
-        if not previous_state.get("in_error_state", False):
-            send_error_alert(error_msg)
-        current_state["in_error_state"] = True
-        save_current_state(current_state)
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
-    check_stock()
+    check_appdetails()
