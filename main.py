@@ -10,6 +10,10 @@ BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
 DECK_MODELS = {
+    # Test item (Always in stock)
+    "79": "TEST: Portal (In Stock Check)",
+    
+    # Live Refurbished Deck IDs
     "903905": "Refurbished 64GB LCD",
     "903906": "Refurbished 256GB LCD",
     "903907": "Refurbished 512GB LCD",
@@ -108,9 +112,7 @@ def check_stock():
                 name_in_api = data.get("name", "Unknown Package")
                 can_purchase = data.get("can_purchase", False)
                 
-                # Expose raw payload details directly in the runner log
                 print(f"[STEAM VERIFIED] ID: {package_id} | Name: '{name_in_api}' | can_purchase: {can_purchase}")
-                
                 is_available = bool(can_purchase)
             else:
                 print(f"[API RESPONSE FAILED] ID: {package_id} | success: {pkg_info.get('success')} | Raw: {pkg_info}")
