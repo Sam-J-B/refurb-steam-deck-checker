@@ -11,19 +11,14 @@ STATE_FILE = "last_state.json"
 
 DECK_MODELS = {
     # Test item (Always in stock)
-    "79": "TEST: Portal (In Stock Check)",
-    
-    # Live Refurbished Deck IDs
+    "7877": "TEST: Portal 2",
+
+    # Refurbished Deck Package IDs
     "903905": "Refurbished 64GB LCD",
     "903906": "Refurbished 256GB LCD",
     "903907": "Refurbished 512GB LCD",
     "1202542": "Refurbished 512GB OLED",
     "1202547": "Refurbished 1TB OLED",
-}
-
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json",
 }
 
 def load_previous_state():
@@ -93,60 +88,85 @@ def check_stock():
     stock_found = False
     all_checks_successful = True
 
-    for package_id, model_name in DECK_MODELS.items():
-        api_url = f"https://store.steampowered.com/api/packagedetails?packageids={package_id}&cc=gb&l=english"
+    session = rq.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Referer": BUY_URL,
+        "X-Requested-With": "XMLHttpRequest"
+    })
+
+    try:
+        # Step 1: Warm up session and extract sessionid cookie
+        init_res = session.get(BUY_URL, params={"cc": "gb", "l": "english"}, cookies={"birthtime": "0", "steamCountry": "GB%7C"}, timeout=15)
         
-        try:
-            response = rq.get(api_url, headers=headers, timeout=10)
-            if response.status_code != 200:
+        sessionid = session.cookies.get("sessionid")
+        if not sessionid:
+            # Fallback cookie retrieval
+            sessionid = session.cookies.get_dict().get("sessionid", "")
+
+        print(f"[SESSION INITIALIZED] sessionid: {sessionid[:8]}...")
+
+        # Step 2: Check each package ID with the session token
+        for package_id, model_name in DECK_MODELS.items():
+            api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&sessionid={sessionid}&cc=GB&l=english"
+            
+            response = session.get(api_url, timeout=10)
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    raw_text = response.text
+                    
+                    # Look for explicit boolean flags or Add to Cart HTML buttons in the response payload
+                    b_purchasable = data.get("bPurchasable", False)
+                    b_in_stock = data.get("bInStock", False)
+                    has_cart_btn = "btn_add_to_cart" in raw_text or "Add to Cart" in raw_text
+
+                    is_available = bool(b_purchasable or b_in_stock or has_cart_btn)
+
+                    print(f"[AJAX RESPONSE] ID: {package_id} ({model_name}) | bPurchasable: {b_purchasable} | bInStock: {b_in_stock} | has_cart_btn: {has_cart_btn}")
+
+                    current_state[package_id] = is_available
+                    was_in_stock = previous_state.get(package_id, False)
+
+                    if is_available:
+                        stock_found = True
+                        if not was_in_stock:
+                            send_alert(model_name, is_instock=True)
+                        else:
+                            print(f"[In Stock - Alert Suppressed] {model_name}")
+                    else:
+                        if was_in_stock:
+                            send_alert(model_name, is_instock=False)
+                        print(f"[Out of stock] {model_name}")
+
+                except json.JSONDecodeError:
+                    print(f"[JSON ERROR] Failed to parse payload for {model_name}. Snippet: {repr(response.text[:100])}")
+                    all_checks_successful = False
+            else:
                 print(f"[HTTP ERROR {response.status_code}] {model_name}")
                 all_checks_successful = False
-                continue
 
-            api_data = response.json()
-            pkg_info = api_data.get(package_id, {})
-            is_available = False
+        if not all_checks_successful:
+            error_msg = "Steam AJAX returned bad status codes or unparseable payloads."
+            if not previous_state.get("in_error_state", False):
+                send_error_alert(error_msg)
+            current_state["in_error_state"] = True
+        else:
+            current_state["in_error_state"] = False
+            if not stock_found:
+                print("All refurbished models are out of stock")
 
-            if pkg_info.get("success") and "data" in pkg_info:
-                data = pkg_info["data"]
-                name_in_api = data.get("name", "Unknown Package")
-                can_purchase = data.get("can_purchase", False)
-                
-                print(f"[STEAM VERIFIED] ID: {package_id} | Name: '{name_in_api}' | can_purchase: {can_purchase}")
-                is_available = bool(can_purchase)
-            else:
-                print(f"[API RESPONSE FAILED] ID: {package_id} | success: {pkg_info.get('success')} | Raw: {pkg_info}")
-                all_checks_successful = False
+        save_current_state(current_state)
 
-            current_state[package_id] = is_available
-            was_in_stock = previous_state.get(package_id, False)
-
-            if is_available:
-                stock_found = True
-                if not was_in_stock:
-                    send_alert(model_name, is_instock=True)
-                else:
-                    print(f"[In Stock - Alert Suppressed] {model_name}")
-            else:
-                if was_in_stock:
-                    send_alert(model_name, is_instock=False)
-                print(f"[Out of stock] {model_name}\n")
-
-        except Exception as e:
-            print(f"[EXCEPTION] Failed checking {model_name}: {e}\n")
-            all_checks_successful = False
-
-    if not all_checks_successful:
-        error_msg = "Steam API returned non-200 status or unparseable payloads."
+    except Exception as e:
+        error_msg = f"Exception checking Steam stock: {e}"
+        print(error_msg)
         if not previous_state.get("in_error_state", False):
             send_error_alert(error_msg)
         current_state["in_error_state"] = True
-    else:
-        current_state["in_error_state"] = False
-        if not stock_found:
-            print("All refurbished models are out of stock")
-
-    save_current_state(current_state)
+        save_current_state(current_state)
 
 if __name__ == "__main__":
     check_stock()
