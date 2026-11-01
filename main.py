@@ -153,4 +153,21 @@ def check_stock():
         current_state[pkg_id] = is_available
         was_in_stock = previous_state.get(pkg_id, False)
 
-        if is_
+        if is_available:
+            stock_found = True
+            if not was_in_stock:
+                send_alert(model_name, is_instock=True)
+            else:
+                print(f"[{model_name}] Still in stock (Alert suppressed)")
+        else:
+            if was_in_stock:
+                send_alert(model_name, is_instock=False)
+            print(f"[{model_name}] Evaluated Out of Stock")
+
+    if not stock_found:
+        print("\nNo stock alerts triggered this run.")
+
+    save_current_state(current_state)
+
+if __name__ == "__main__":
+    check_stock()
