@@ -1,7 +1,8 @@
 import json
 import os
 import sys
-from curl_cffi import requests as rq
+from playwright.sync_api import sync_playwright
+import requests as rq
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 if not NTFY_TOPIC:
@@ -11,17 +12,12 @@ if not NTFY_TOPIC:
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
-# A permanently in-stock digital package to prove the API parser actually works
-TEST_MODELS = {
-    "7877": "TEST: Portal 2"
-}
-
 DECK_MODELS = {
-    "903905": "Refurbished 64GB LCD",
-    "903906": "Refurbished 256GB LCD",
-    "903907": "Refurbished 512GB LCD",
-    "1202542": "Refurbished 512GB OLED",
-    "1202547": "Refurbished 1TB OLED",
+    "Steam Deck 64 GB LCD - Valve Certified Refurbished": "Refurbished 64GB LCD",
+    "Steam Deck 256 GB LCD - Valve Certified Refurbished": "Refurbished 256GB LCD",
+    "Steam Deck 512 GB LCD - Valve Certified Refurbished": "Refurbished 512GB LCD",
+    "Steam Deck 512 GB OLED - Valve Certified Refurbished": "Refurbished 512GB OLED",
+    "Steam Deck 1TB OLED - Valve Certified Refurbished": "Refurbished 1TB OLED",
 }
 
 def load_previous_state():
@@ -40,7 +36,7 @@ def save_current_state(state):
     except Exception as e:
         print(f"Error saving state: {e}")
 
-def send_alert(model_name, is_instock=True):
+def send_alert(model_name, is_instock=True, is_test=False):
     if is_instock:
         message = f"{model_name} is IN STOCK!"
         priority = "high"
@@ -50,94 +46,115 @@ def send_alert(model_name, is_instock=True):
         priority = "low"
         tags = "x,steamdeck"
 
+    if is_test:
+        title = "Test: Alert Logic Verified!"
+    else:
+        title = "Steam Deck Restock Alert!"
+
     print(f"[ALERT SENT] {message}")
     try:
         rq.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode("utf-8"),
             headers={
-                "Title": "Steam Deck Restock Alert!",
+                "Title": title,
                 "Click": BUY_URL,
                 "Priority": priority,
                 "Tags": tags
             },
-            impersonate="chrome",
             timeout=10
         )
     except Exception as e:
         print(f"ntfy error: {e}")
 
-def query_steam_api(pkg_id, friendly_name):
-    api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={pkg_id}&cc=GB"
+def run_positive_control_test(context):
+    print("==================================================")
+    print("PHASE 1: POSITIVE CONTROL TEST (PROVING THE LOGIC)")
+    print("==================================================")
+    page = context.new_page()
+    page.goto("https://store.steampowered.com/app/620/Portal_2/", wait_until="networkidle", timeout=30000)
+    page.wait_for_timeout(2000)
     
-    try:
-        # impersonate="chrome" mathematically spoofs the TLS fingerprint to bypass Akamai WAF
-        res = rq.get(
-            api_url, 
-            impersonate="chrome", 
-            cookies={"steamCountry": "GB%7C"},
-            headers={"X-Requested-With": "XMLHttpRequest", "Referer": BUY_URL},
-            timeout=15
-        )
-        
-        print(f"  -> HTTP Status: {res.status_code}")
-        
-        if res.status_code == 200 and "{" in res.text:
-            data = res.json()
-            b_purchasable = bool(data.get("bPurchasable", False))
-            b_in_stock = bool(data.get("bInStock", False))
+    visible_text = page.locator("body").inner_text()
+    lines = [line.strip() for line in visible_text.split('\n') if line.strip()]
+    
+    found = False
+    for i, line in enumerate(lines):
+        if "Buy Portal 2" in line:
+            found = True
+            block_snippet = " ".join(lines[i : i + 4]).lower()
+            if "out of stock" in block_snippet:
+                print("-> RESULT: Evaluated as Out of Stock (LOGIC FAILURE)")
+            else:
+                print("-> RESULT: Evaluated as IN STOCK (LOGIC SUCCESS)")
+                send_alert("TEST TARGET (Portal 2)", is_instock=True, is_test=True)
+            break
             
-            print(f"  -> Raw JSON Keys: bPurchasable={b_purchasable} | bInStock={b_in_stock}")
-            return b_purchasable or b_in_stock
-        else:
-            print(f"  -> WAF Blocked or Bad Payload: {res.text[:100]}")
-            return False
-            
-    except Exception as e:
-        print(f"  -> Request Exception: {e}")
-        return False
+    if not found:
+        print("-> RESULT: Test target not found on page.")
+    page.close()
+    print("\n")
 
 def check_stock():
     previous_state = load_previous_state()
     current_state = previous_state.copy()
+    
+    print(f"Initializing Playwright Browser...")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(locale="en-GB")
+        context.add_cookies([
+            {"name": "steamCountry", "value": "GB%7C", "domain": ".steampowered.com", "path": "/"}
+        ])
+        
+        # 1. Run the test to prove the logic fires when "out of stock" is absent
+        run_positive_control_test(context)
+        
+        # 2. Check the real refurbished hardware page
+        print("==================================================")
+        print("PHASE 2: LIVE REFURBISHED HARDWARE CHECK")
+        print("==================================================")
+        
+        page = context.new_page()
+        page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
+        page.wait_for_timeout(5000) 
+        
+        visible_text = page.locator("body").inner_text()
+        lines = [line.strip() for line in visible_text.split('\n') if line.strip()]
+        browser.close()
+
     stock_found = False
 
-    print("==================================================")
-    print("PHASE 1: POSITIVE CONTROL TEST (API VERIFICATION)")
-    print("==================================================")
-    
-    for pkg_id, friendly_name in TEST_MODELS.items():
-        print(f"Testing known in-stock item: {friendly_name}")
-        is_available = query_steam_api(pkg_id, friendly_name)
-        if is_available:
-            print("SUCCESS: API parser correctly identified active stock.\n")
-        else:
-            print("FAILURE: API parser failed to identify active stock. Script logic is broken.\n")
-
-    print("==================================================")
-    print("PHASE 2: LIVE REFURBISHED HARDWARE CHECK")
-    print("==================================================")
-
-    for pkg_id, friendly_name in DECK_MODELS.items():
-        print(f"Checking: {friendly_name}")
-        is_available = query_steam_api(pkg_id, friendly_name)
+    for exact_title, friendly_name in DECK_MODELS.items():
+        is_available = False
         
-        current_state[pkg_id] = is_available
-        was_in_stock = previous_state.get(pkg_id, False)
+        for i, line in enumerate(lines):
+            if exact_title in line:
+                block_snippet = " ".join(lines[i : i + 4]).lower()
+                
+                if "out of stock" in block_snippet:
+                    is_available = False
+                else:
+                    is_available = True
+                break
+
+        current_state[friendly_name] = is_available
+        was_in_stock = previous_state.get(friendly_name, False)
 
         if is_available:
             stock_found = True
             if not was_in_stock:
                 send_alert(friendly_name, is_instock=True)
             else:
-                print(f"  -> State: Still in stock (Alert suppressed)\n")
+                print(f"[{friendly_name}] Still in stock (Alert suppressed)")
         else:
             if was_in_stock:
                 send_alert(friendly_name, is_instock=False)
-            print(f"  -> State: Out of Stock\n")
+            print(f"[{friendly_name}] Evaluated Out of Stock")
 
     if not stock_found:
-        print("Final Status: All refurbished models are currently out of stock.")
+        print("\nAll refurbished models are currently out of stock.")
 
     save_current_state(current_state)
 
