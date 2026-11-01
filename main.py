@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import re
 from playwright.sync_api import sync_playwright
 import requests as rq
 
@@ -66,8 +67,9 @@ def check_stock():
     previous_state = load_previous_state()
     current_state = previous_state.copy()
     
-    # Default everything to False
-    stock_results = {pkg_id: False for pkg_id in DECK_MODELS.keys()}
+    print("==================================================")
+    print("STARTING MULTI-VECTOR STOCK CHECK")
+    print("==================================================\n")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -75,52 +77,80 @@ def check_stock():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             locale="en-GB"
         )
-        context.add_cookies([
-            {"name": "steamCountry", "value": "GB%7C", "domain": ".steampowered.com", "path": "/"}
-        ])
-
+        context.add_cookies([{"name": "steamCountry", "value": "GB%7C", "domain": ".steampowered.com", "path": "/"}])
         page = context.new_page()
 
-        # Listen for Steam's backend stock check JSON
+        # METHOD 1: Passive Network Interception
+        print("--- METHOD 1: Listening for Steam AJAX Calls ---")
         def handle_response(response):
-            if "ajaxgetpackageinfo" in response.url:
+            url = response.url
+            if "steampowered.com" in url and ("packageinfo" in url.lower() or "getitem" in url.lower()):
                 try:
-                    data = response.json()
-                    for pkg_id in DECK_MODELS.keys():
-                        if f"packageid={pkg_id}" in response.url:
-                            b_purchasable = bool(data.get("bPurchasable", False))
-                            b_in_stock = bool(data.get("bInStock", False))
-                            stock_results[pkg_id] = b_purchasable or b_in_stock
+                    print(f"[INTERCEPT] URL: {url} | Status: {response.status}")
+                    text = response.text()
+                    print(f"  -> Payload Snippet: {text[:200]}\n")
                 except Exception:
                     pass
 
         page.on("response", handle_response)
-        print("Checking Steam Deck Refurbished page via Playwright...")
-        page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(2000)  # Ensure React finishes firing AJAX requests
+        
+        print(f"Loading {BUY_URL} ...")
+        res = page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
+        print(f"Page Load HTTP Status: {res.status if res else 'Unknown'}\n")
+        page.wait_for_timeout(3000) # Let React render
+
+        # METHOD 2: Live DOM Parsing
+        print("--- METHOD 2: Parsing Rendered DOM ---")
+        html = page.content()
+        dom_results = {}
+        for pkg_id in DECK_MODELS.keys():
+            # Look for Valve's standard purchase button wrappers or package ID mentions
+            matches = re.finditer(f'[^>]*{pkg_id}[^>]*>(.*?)</div>', html, re.IGNORECASE)
+            snippets = [m.group(0)[:100].replace('\n', ' ') for m in matches]
+            
+            if snippets:
+                print(f"[{pkg_id}] Found DOM element snippet(s): {snippets[:2]}")
+                dom_results[pkg_id] = "out of stock" not in str(snippets).lower()
+            else:
+                print(f"[{pkg_id}] No explicit DOM elements found linking to this package ID.")
+                dom_results[pkg_id] = False
+        print("\n")
+
+        # METHOD 3: Active Internal API Fetch
+        print("--- METHOD 3: Authenticated Context API Fetch ---")
+        fetch_results = {}
+        for pkg_id, name in DECK_MODELS.items():
+            api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={pkg_id}&cc=GB"
+            try:
+                # This request comes FROM the browser, bypassing the CDN 404s
+                api_res = context.request.get(api_url)
+                body = api_res.text()
+                
+                print(f"[{pkg_id}] Fetch Status: {api_res.status} | Payload: {body[:150]}")
+                
+                if api_res.status == 200 and "{" in body:
+                    data = json.loads(body)
+                    b_purchasable = bool(data.get("bPurchasable", False))
+                    b_in_stock = bool(data.get("bInStock", False))
+                    fetch_results[pkg_id] = b_purchasable or b_in_stock
+                else:
+                    fetch_results[pkg_id] = False
+            except Exception as e:
+                print(f"[{pkg_id}] Fetch Error: {e}")
+                fetch_results[pkg_id] = False
+        
         browser.close()
 
+    print("\n==================================================")
+    print("FINAL EVALUATION")
+    print("==================================================")
+    
     stock_found = False
     for pkg_id, model_name in DECK_MODELS.items():
-        is_available = stock_results[pkg_id]
+        # Using the direct fetch as the primary source of truth, fallback to DOM if API failed
+        is_available = fetch_results.get(pkg_id, False) or dom_results.get(pkg_id, False)
+        
         current_state[pkg_id] = is_available
         was_in_stock = previous_state.get(pkg_id, False)
 
-        if is_available:
-            stock_found = True
-            if not was_in_stock:
-                send_alert(model_name, is_instock=True)
-            else:
-                print(f"[{model_name}] Still in stock (Alert suppressed)")
-        else:
-            if was_in_stock:
-                send_alert(model_name, is_instock=False)
-            print(f"[{model_name}] Out of stock")
-
-    if not stock_found:
-        print("\nAll refurbished models are currently out of stock.")
-
-    save_current_state(current_state)
-
-if __name__ == "__main__":
-    check_stock()
+        if is_
