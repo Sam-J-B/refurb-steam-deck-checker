@@ -1,25 +1,29 @@
 import requests as rq
+import time
 
-# 2550670 = Refurbished Steam Deck (Master App ID)
-# 400 = Portal (Test App ID)
-API_URL = "https://store.steampowered.com/api/appdetails?appids=2550670,400&cc=gb"
+# 2550670 = Refurbished Steam Deck
+# 400 = Portal
+APP_IDS = [2550670, 400]
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json"
 }
 
 def check_appdetails():
-    print(f"Fetching {API_URL}...\n")
-    try:
-        res = rq.get(API_URL, headers=headers, timeout=15)
-        if res.status_code != 200:
-            print(f"HTTP ERROR: {res.status_code}")
-            return
-            
-        data = res.json()
+    for app_id in APP_IDS:
+        api_url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&cc=gb"
+        print(f"Fetching {api_url}...\n")
         
-        for app_id, app_info in data.items():
+        try:
+            res = rq.get(api_url, headers=headers, timeout=15)
+            if res.status_code != 200:
+                print(f"HTTP ERROR {res.status_code} for App ID {app_id}\n")
+                continue
+                
+            data = res.json()
+            app_info = data.get(str(app_id), {})
+            
             print(f"{'='*50}")
             print(f"APP ID: {app_id}")
             print(f"{'='*50}")
@@ -47,14 +51,16 @@ def check_appdetails():
                     pkg_id = sub.get("packageid")
                     print(f"\n     * ACTIVE SUB ID: {pkg_id}")
                     
-                    # Print all keys attached to this active package to see if a stock flag exists
                     for k, v in sub.items():
                         if k not in ["packageid", "option_description", "option_text"]:
                             print(f"       - {k}: {v}")
             print("\n")
             
-    except Exception as e:
-        print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error checking {app_id}: {e}\n")
+            
+        # Brief pause to avoid rate limiting
+        time.sleep(1)
 
 if __name__ == "__main__":
     check_appdetails()
