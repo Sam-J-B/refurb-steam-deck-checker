@@ -1,18 +1,15 @@
-import json
 import os
 import re
 import requests as rq
 
-NTFY_TOPIC = os.getenv("NTFY_TOPIC")
-if not NTFY_TOPIC:
-    raise ValueError("NTFY_TOPIC environment variable is not set!")
-
-# Portal test page
-BUY_URL = "https://store.steampowered.com/app/400/Portal/"
-STATE_FILE = "last_state.json"
+BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 
 DECK_MODELS = {
-    "79": "TEST: Portal Digital Game",
+    "903905": "Refurbished 64GB LCD",
+    "903906": "Refurbished 256GB LCD",
+    "903907": "Refurbished 512GB LCD",
+    "1202542": "Refurbished 512GB OLED",
+    "1202547": "Refurbished 1TB OLED",
 }
 
 headers = {
@@ -20,139 +17,33 @@ headers = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-def load_previous_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading state file: {e}")
-    return {}
+def debug_dump():
+    params = {"cc": "gb", "l": "english"}
+    cookies = {"birthtime": "0", "lastvisit": "0", "steamCountry": "GB%7C"}
+    
+    response = rq.get(BUY_URL, headers=headers, params=params, cookies=cookies, timeout=15)
+    print(f"[HTTP STATUS] {response.status_code}")
+    html = response.text
+    print(f"[TOTAL HTML LENGTH] {len(html)} chars\n")
 
-def save_current_state(state):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=4)
-    except Exception as e:
-        print(f"Error saving state file: {e}")
-
-def send_alert(model_name, is_instock=True):
-    if is_instock:
-        message = f"{model_name} is in stock!"
-        title = "Steam Deck Refurb Restock!"
-        priority = "high"
-        tags = "tada,steamdeck"
-    else:
-        message = f"{model_name} has just gone out of stock."
-        title = "Steam Deck Sold Out"
-        priority = "low"
-        tags = "x,steamdeck"
-
-    print(f"[ALERT SENT] {message}")
-
-    try:
-        rq.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
-            headers={
-                "Title": title,
-                "Click": BUY_URL,
-                "Priority": priority,
-                "Tags": tags
-            },
-            timeout=10
-        )
-    except Exception as e:
-        print(f"ntfy error: {e}")
-
-def send_error_alert(error_message):
-    print(f"[ERROR ALERT SENT] {error_message}")
-    try:
-        rq.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=error_message.encode("utf-8"),
-            headers={
-                "Title": "Script Error: Steam Deck Checker",
-                "Priority": "high",
-                "Tags": "warning"
-            },
-            timeout=10
-        )
-    except Exception as e:
-        print(f"ntfy error: {e}")
-
-def check_stock_html():
-    previous_state = load_previous_state()
-    current_state = previous_state.copy() 
-    stock_found = False
-
-    try:
-        response = rq.get(BUY_URL, headers=headers, cookies={"birthtime": "0", "lastvisit": "0"}, timeout=15)
+    for pkg_id, name in DECK_MODELS.items():
+        print(f"==================================================")
+        print(f"DEBUG FOR {name} (ID: {pkg_id})")
+        print(f"==================================================")
         
-        if response.status_code != 200:
-            error_msg = f"Failed to fetch store page. HTTP Status: {response.status_code}"
-            print(error_msg)
-            
-            if not previous_state.get("in_error_state", False):
-                send_error_alert(error_msg)
-            
-            current_state["in_error_state"] = True
-            save_current_state(current_state)
-            return
-
-        html = response.text
-        current_state["in_error_state"] = False
-
-        for package_id, model_name in DECK_MODELS.items():
-            is_available = False
-            
-            # Find EVERY instance of the package ID in the HTML as a standalone word
-            matches = [m.start() for m in re.finditer(r'\b' + package_id + r'\b', html)]
-            
-            for idx in matches:
-                # Grab surrounding HTML for each match and look for cart elements
-                snippet = html[max(0, idx - 500): min(len(html), idx + 2000)]
-                
-                has_cart_button = any(term in snippet for term in [
-                    "btn_add_to_cart", 
-                    "add_to_cart", 
-                    "btn_green_steamui", 
-                    "Add to Cart",
-                    "btn_addtocart"
-                ])
-                
-                if has_cart_button:
-                    is_available = True
-                    break # We found the actual purchase block, stop searching
-
-            current_state[package_id] = is_available
-            was_in_stock = previous_state.get(package_id, False)
-
-            if is_available:
-                stock_found = True
-                if not was_in_stock:
-                    send_alert(model_name, is_instock=True)
-                else:
-                    print(f"[In Stock - Alert Suppressed] {model_name}")
-            else:
-                if was_in_stock:
-                    send_alert(model_name, is_instock=False)
-                print(f"[Out of stock] {model_name}")
-
-        if not stock_found:
-            print("All refurbished models are out of stock")
-
-        save_current_state(current_state)
-
-    except Exception as e:
-        error_msg = f"Exception parsing Steam page: {e}"
-        print(error_msg)
+        matches = [m.start() for m in re.finditer(r'\b' + pkg_id + r'\b', html)]
+        print(f"Total occurrences found in HTML: {len(matches)}")
         
-        if not previous_state.get("in_error_state", False):
-            send_error_alert(error_msg)
-        
-        current_state["in_error_state"] = True
-        save_current_state(current_state)
+        if not matches:
+            print("  [WARNING] Package ID not found anywhere in raw HTML!")
+            continue
+
+        for i, idx in enumerate(matches[:3], start=1):
+            snippet = html[max(0, idx - 150): min(len(html), idx + 350)]
+            clean_snippet = " ".join(snippet.split())
+            print(f"\n--- Match #{i} (Offset {idx}) ---")
+            print(f"{clean_snippet}")
+        print("\n")
 
 if __name__ == "__main__":
-    check_stock_html()
+    debug_dump()
