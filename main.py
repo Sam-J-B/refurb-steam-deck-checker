@@ -1,79 +1,141 @@
 import json
-import urllib.parse
+import os
 import requests as rq
 
-# Portal 2 (7877) and Refurb 64GB LCD (903905)
-PACKAGE_IDS = [7877, 903905]
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+if not NTFY_TOPIC:
+    raise ValueError("NTFY_TOPIC environment variable is not set!")
 
-def check_store_browse_api():
-    url = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1"
-    
-    # We construct the exact JSON payload the React frontend requests
-    input_dict = {
-        "context": {
-            "language": "english",
-            "country_code": "GB",
-            "steam_realm": 1
-        },
-        "data_request": {
-            "include_assets": False,
-            "include_release": False,
-            "include_platforms": False,
-            "include_all_purchase_options": True,
-            "include_screenshots": False,
-            "include_trailers": False,
-            "include_ratings": False,
-            "include_tag_count": 0,
-            "include_reviews": False,
-            "include_basic_info": True,
-            "include_supported_languages": False,
-            "include_full_description": False,
-            "include_included_items": False
-        },
-        "ids": [{"packageid": pid} for pid in PACKAGE_IDS]
-    }
-    
-    params = {
-        "input_json": json.dumps(input_dict)
-    }
-    
-    print(f"Requesting: {url}\n")
-    
+BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
+STATE_FILE = "last_state.json"
+
+DECK_MODELS = {
+    "903905": "Refurbished 64GB LCD",
+    "903906": "Refurbished 256GB LCD",
+    "903907": "Refurbished 512GB LCD",
+    "1202542": "Refurbished 512GB OLED",
+    "1202547": "Refurbished 1TB OLED",
+}
+
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept": "application/json",
+}
+
+def load_previous_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading state file: {e}")
+    return {}
+
+def save_current_state(state):
     try:
-        res = rq.get(url, params=params, timeout=15)
-        
-        if res.status_code != 200:
-            print(f"HTTP Error: {res.status_code}")
-            print(res.text[:200])
-            return
-            
-        data = res.json()
-        store_items = data.get("response", {}).get("store_items", [])
-        
-        if not store_items:
-            print("[EMPTY] No store items returned.")
-            print(f"Raw response: {data}")
-            return
-            
-        for item in store_items:
-            name = item.get("name", "Unknown")
-            pid = item.get("id")
-            print(f"{'='*50}\nID: {pid} | {name}\n{'='*50}")
-            
-            purchase_options = item.get("purchase_options", [])
-            if not purchase_options:
-                print("  [NO PURCHASE OPTIONS] (Often means out of stock/delisted)")
-                continue
-                
-            for i, opt in enumerate(purchase_options):
-                print(f"\n  -- Purchase Option #{i+1} --")
-                # Expose every single raw boolean/integer attached to the purchase option
-                for k, v in opt.items():
-                    print(f"     {k}: {v}")
-            print("\n")
-            
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=4)
     except Exception as e:
-        print(f"Exception: {e}")
+        print(f"Error saving state file: {e}")
+
+def send_alert(model_name, is_instock=True):
+    if is_instock:
+        message = f"{model_name} is in stock!"
+        title = "Steam Deck Refurb Restock!"
+        priority = "high"
+        tags = "tada,steamdeck"
+    else:
+        message = f"{model_name} has just gone out of stock."
+        title = "Steam Deck Sold Out"
+        priority = "low"
+        tags = "x,steamdeck"
+
+    print(f"[ALERT SENT] {message}")
+
+    try:
+        rq.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=message.encode("utf-8"),
+            headers={
+                "Title": title,
+                "Click": BUY_URL,
+                "Priority": priority,
+                "Tags": tags
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f"ntfy error: {e}")
+
+def send_error_alert(error_message):
+    print(f"[ERROR ALERT SENT] {error_message}")
+    try:
+        rq.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=error_message.encode("utf-8"),
+            headers={
+                "Title": "Script Error: Steam Deck Checker",
+                "Priority": "high",
+                "Tags": "warning"
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f"ntfy error: {e}")
+
+def check_stock():
+    previous_state = load_previous_state()
+    current_state = previous_state.copy()
+    stock_found = False
+    all_checks_successful = True
+
+    for package_id, model_name in DECK_MODELS.items():
+        # The ultimate un-walled endpoint for physical hardware inventory
+        api_url = f"https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?country_code=GB&packageid={package_id}"
+        
+        try:
+            response = rq.get(api_url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                print(f"[HTTP ERROR {response.status_code}] {model_name}")
+                all_checks_successful = False
+                continue
+
+            data = response.json()
+            res_data = data.get("response", {})
+            
+            is_available = bool(res_data.get("inventory_available", False))
+            
+            print(f"[PHYSICAL GOODS SERVICE] ID: {package_id} | inventory_available: {is_available}")
+
+            current_state[package_id] = is_available
+            was_in_stock = previous_state.get(package_id, False)
+
+            if is_available:
+                stock_found = True
+                if not was_in_stock:
+                    send_alert(model_name, is_instock=True)
+                else:
+                    print(f"[In Stock - Alert Suppressed] {model_name}")
+            else:
+                if was_in_stock:
+                    send_alert(model_name, is_instock=False)
+                print(f"[Out of stock] {model_name}\n")
+
+        except Exception as e:
+            print(f"[EXCEPTION] Failed checking {model_name}: {e}\n")
+            all_checks_successful = False
+
+    if not all_checks_successful:
+        error_msg = "Steam API returned non-200 status or unparseable payloads."
+        if not previous_state.get("in_error_state", False):
+            send_error_alert(error_msg)
+        current_state["in_error_state"] = True
+    else:
+        current_state["in_error_state"] = False
+        if not stock_found:
+            print("All refurbished models are out of stock")
+
+    save_current_state(current_state)
 
 if __name__ == "__main__":
-    check_store_browse_api()
+    check_stock()
