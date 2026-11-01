@@ -36,7 +36,7 @@ def save_current_state(state):
     except Exception as e:
         print(f"Error saving state: {e}")
 
-def send_alert(model_name, is_instock=True, is_test=False):
+def send_alert(model_name, is_instock=True):
     if is_instock:
         message = f"{model_name} is IN STOCK!"
         priority = "high"
@@ -46,18 +46,13 @@ def send_alert(model_name, is_instock=True, is_test=False):
         priority = "low"
         tags = "x,steamdeck"
 
-    if is_test:
-        title = "Test: Alert Logic Verified!"
-    else:
-        title = "Steam Deck Restock Alert!"
-
     print(f"[ALERT SENT] {message}")
     try:
         rq.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode("utf-8"),
             headers={
-                "Title": title,
+                "Title": "Steam Deck Restock Alert!",
                 "Click": BUY_URL,
                 "Priority": priority,
                 "Tags": tags
@@ -67,39 +62,11 @@ def send_alert(model_name, is_instock=True, is_test=False):
     except Exception as e:
         print(f"ntfy error: {e}")
 
-def run_positive_control_test(context):
-    print("==================================================")
-    print("PHASE 1: POSITIVE CONTROL TEST (PROVING THE LOGIC)")
-    print("==================================================")
-    page = context.new_page()
-    page.goto("https://store.steampowered.com/app/620/Portal_2/", wait_until="networkidle", timeout=30000)
-    page.wait_for_timeout(2000)
-    
-    visible_text = page.locator("body").inner_text()
-    lines = [line.strip() for line in visible_text.split('\n') if line.strip()]
-    
-    found = False
-    for i, line in enumerate(lines):
-        if "Buy Portal 2" in line:
-            found = True
-            block_snippet = " ".join(lines[i : i + 4]).lower()
-            if "out of stock" in block_snippet:
-                print("-> RESULT: Evaluated as Out of Stock (LOGIC FAILURE)")
-            else:
-                print("-> RESULT: Evaluated as IN STOCK (LOGIC SUCCESS)")
-                send_alert("TEST TARGET (Portal 2)", is_instock=True, is_test=True)
-            break
-            
-    if not found:
-        print("-> RESULT: Test target not found on page.")
-    page.close()
-    print("\n")
-
 def check_stock():
     previous_state = load_previous_state()
     current_state = previous_state.copy()
     
-    print(f"Initializing Playwright Browser...")
+    print(f"Loading {BUY_URL} via Playwright...")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -107,14 +74,6 @@ def check_stock():
         context.add_cookies([
             {"name": "steamCountry", "value": "GB%7C", "domain": ".steampowered.com", "path": "/"}
         ])
-        
-        # 1. Run the test to prove the logic fires when "out of stock" is absent
-        run_positive_control_test(context)
-        
-        # 2. Check the real refurbished hardware page
-        print("==================================================")
-        print("PHASE 2: LIVE REFURBISHED HARDWARE CHECK")
-        print("==================================================")
         
         page = context.new_page()
         page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
