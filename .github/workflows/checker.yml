@@ -16,10 +16,21 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install playwright requests
+
+      - name: Cache Playwright Browser
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
+      - name: Install Playwright Chromium (if not cached)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium --with-deps
 
       - name: Restore stock state cache
         uses: actions/cache@v4
