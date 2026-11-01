@@ -17,6 +17,11 @@ DECK_MODELS = {
     "1202547": "Refurbished 1TB OLED",
 }
 
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
 def load_previous_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -83,24 +88,15 @@ def check_stock():
     current_state = previous_state.copy()
     stock_found = False
 
-    session = rq.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": BUY_URL
-    })
-    session.cookies.update({
-        "birthtime": "0",
-        "lastvisit": "0",
-        "steamCountry": "GB%7C"
-    })
+    # Batch request all package IDs in a single query
+    package_ids_str = ",".join(DECK_MODELS.keys())
+    api_url = f"https://store.steampowered.com/api/packagedetails?packageids={package_ids_str}&cc=gb&l=english"
 
     try:
-        # Step 1: Warm up the session to acquire Steam's sessionid and browserid cookies
-        init_res = session.get(BUY_URL, params={"cc": "gb", "l": "english"}, timeout=15)
-        if init_res.status_code != 200:
-            error_msg = f"Failed to initialize Steam session. HTTP Status: {init_res.status_code}"
+        response = rq.get(api_url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            error_msg = f"Steam API HTTP status {response.status_code}"
             print(error_msg)
             if not previous_state.get("in_error_state", False):
                 send_error_alert(error_msg)
@@ -108,53 +104,43 @@ def check_stock():
             save_current_state(current_state)
             return
 
-        all_checks_successful = True
-
-        # Step 2: Query stock status with active session cookies
-        for package_id, model_name in DECK_MODELS.items():
-            api_url = f"https://store.steampowered.com/saleaction/ajaxgetpackageinfo?packageid={package_id}&cc=GB"
-            
-            response = session.get(api_url, timeout=10)
-            if response.status_code == 200 and response.text.strip():
-                try:
-                    data = response.json()
-                    is_available = bool(
-                        data.get("bPurchasable", False) or 
-                        data.get("bInStock", False) or 
-                        data.get("purchasable", False) or 
-                        data.get("in_stock", False)
-                    )
-
-                    current_state[package_id] = is_available
-                    was_in_stock = previous_state.get(package_id, False)
-
-                    if is_available:
-                        stock_found = True
-                        if not was_in_stock:
-                            send_alert(model_name, is_instock=True)
-                        else:
-                            print(f"[In Stock - Alert Suppressed] {model_name}")
-                    else:
-                        if was_in_stock:
-                            send_alert(model_name, is_instock=False)
-                        print(f"[Out of stock] {model_name}")
-
-                except json.JSONDecodeError:
-                    print(f"[API ERROR] Raw response for {model_name}: {repr(response.text[:150])}")
-                    all_checks_successful = False
-            else:
-                print(f"[HTTP/EMPTY ERROR] Status {response.status_code} for {model_name}. Body: {repr(response.text[:150])}")
-                all_checks_successful = False
-
-        if not all_checks_successful:
-            error_msg = "Steam API returned empty or non-JSON payloads."
+        try:
+            api_data = response.json()
+        except json.JSONDecodeError:
+            error_msg = f"Failed to parse JSON response from packagedetails. Raw text: {repr(response.text[:150])}"
+            print(error_msg)
             if not previous_state.get("in_error_state", False):
                 send_error_alert(error_msg)
             current_state["in_error_state"] = True
-        else:
-            current_state["in_error_state"] = False
-            if not stock_found:
-                print("All refurbished models are out of stock")
+            save_current_state(current_state)
+            return
+
+        current_state["in_error_state"] = False
+
+        for package_id, model_name in DECK_MODELS.items():
+            pkg_info = api_data.get(package_id, {})
+            is_available = False
+
+            if pkg_info.get("success") and "data" in pkg_info:
+                data = pkg_info["data"]
+                is_available = bool(data.get("can_purchase", False))
+
+            current_state[package_id] = is_available
+            was_in_stock = previous_state.get(package_id, False)
+
+            if is_available:
+                stock_found = True
+                if not was_in_stock:
+                    send_alert(model_name, is_instock=True)
+                else:
+                    print(f"[In Stock - Alert Suppressed] {model_name}")
+            else:
+                if was_in_stock:
+                    send_alert(model_name, is_instock=False)
+                print(f"[Out of stock] {model_name}")
+
+        if not stock_found:
+            print("All refurbished models are out of stock")
 
         save_current_state(current_state)
 
