@@ -13,12 +13,13 @@ if not NTFY_TOPIC:
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
+# Core keywords to match each model flexibly regardless of minor title text changes
 DECK_MODELS = {
-    "Steam Deck 64 GB LCD - Valve Certified Refurbished": "Refurbished 64GB LCD",
-    "Steam Deck 256 GB LCD - Valve Certified Refurbished": "Refurbished 256GB LCD",
-    "Steam Deck 512 GB LCD - Valve Certified Refurbished": "Refurbished 512GB LCD",
-    "Steam Deck 512 GB OLED - Valve Certified Refurbished": "Refurbished 512GB OLED",
-    "Steam Deck 1TB OLED - Valve Certified Refurbished": "Refurbished 1TB OLED",
+    "64 GB LCD": "Refurbished 64GB LCD",
+    "256 GB LCD": "Refurbished 256GB LCD",
+    "512 GB LCD": "Refurbished 512GB LCD",
+    "512 GB OLED": "Refurbished 512GB OLED",
+    "1TB OLED": "Refurbished 1TB OLED",
 }
 
 def load_previous_state():
@@ -96,18 +97,17 @@ def check_stock():
             page = context.new_page()
             response = page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
             
-            # 1. Catch WAF blocks or bad HTTP responses
             if response and response.status not in [200, 304]:
                 send_error_alert(f"Valve returned bad HTTP status: {response.status}")
                 return
 
-            page.wait_for_timeout(5000) 
+            # Extended wait to ensure React DOM hydration finishes
+            page.wait_for_timeout(6000) 
             
             visible_text = page.locator("body").inner_text()
             lines = [line.strip() for line in visible_text.split('\n') if line.strip()]
             browser.close()
 
-        # 2. Catch blank pages (React failed to load or Akamai blocked the content)
         if not lines or len(lines) < 10:
             send_error_alert("Page loaded but no text found. WAF block or React failure.")
             return
@@ -115,13 +115,15 @@ def check_stock():
         stock_found = False
         models_found_in_dom = 0
 
-        for exact_title, friendly_name in DECK_MODELS.items():
+        for key_phrase, friendly_name in DECK_MODELS.items():
             is_available = False
             
             for i, line in enumerate(lines):
-                if exact_title in line:
+                # Search for the core model identifier in the line (e.g. "64 GB LCD")
+                if key_phrase.lower() in line.lower():
                     models_found_in_dom += 1
-                    block_snippet = " ".join(lines[i : i + 4]).lower()
+                    # Inspect the next 4 lines for "out of stock"
+                    block_snippet = " ".join(lines[i : i + 5]).lower()
                     
                     if "out of stock" in block_snippet:
                         is_available = False
@@ -143,9 +145,12 @@ def check_stock():
                     send_alert(friendly_name, is_instock=False)
                 print(f"[{friendly_name}] Evaluated Out of Stock")
 
-        # 3. Catch UI layout changes (if we can't find ANY of the Steam Deck titles on the page)
+        # If zero models matched, log the raw lines captured so we can diagnose via GitHub Action logs
         if models_found_in_dom == 0:
-            send_error_alert("Could not find any Steam Deck titles. Valve may have changed the webpage layout.")
+            print("\n[DIAGNOSTIC LOG DUMP] Top 40 lines of text found on page:")
+            for line in lines[:40]:
+                print(f"  -> {line}")
+            send_error_alert("Could not find Steam Deck model keywords on page.")
             return
 
         if not stock_found:
@@ -154,8 +159,7 @@ def check_stock():
         save_current_state(current_state)
 
     except Exception as e:
-        # 4. Catch outright script crashes or Playwright timeouts
-        error_details = str(e).split('\n')[0] # Grab just the first line of the error so ntfy isn't overwhelmed
+        error_details = str(e).split('\n')[0]
         send_error_alert(f"Script crashed: {error_details}")
         traceback.print_exc()
 
