@@ -13,7 +13,6 @@ if not NTFY_TOPIC:
 BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
 STATE_FILE = "last_state.json"
 
-# Core keywords to match each model flexibly regardless of minor title text changes
 DECK_MODELS = {
     "64 GB LCD": "Refurbished 64GB LCD",
     "256 GB LCD": "Refurbished 256GB LCD",
@@ -101,7 +100,6 @@ def check_stock():
                 send_error_alert(f"Valve returned bad HTTP status: {response.status}")
                 return
 
-            # Extended wait to ensure React DOM hydration finishes
             page.wait_for_timeout(6000) 
             
             visible_text = page.locator("body").inner_text()
@@ -115,21 +113,39 @@ def check_stock():
         stock_found = False
         models_found_in_dom = 0
 
+        print("\n==================================================")
+        print("DOM MATCHING & PARSING LOGS")
+        print("==================================================")
+
         for key_phrase, friendly_name in DECK_MODELS.items():
             is_available = False
+            matched_line = None
+            snippet_checked = None
             
             for i, line in enumerate(lines):
-                # Search for the core model identifier in the line (e.g. "64 GB LCD")
-                if key_phrase.lower() in line.lower():
+                line_lower = line.lower()
+                # Must contain BOTH the capacity identifier AND 'refurbished'
+                if key_phrase.lower() in line_lower and "refurbished" in line_lower:
                     models_found_in_dom += 1
-                    # Inspect the next 4 lines for "out of stock"
-                    block_snippet = " ".join(lines[i : i + 5]).lower()
+                    matched_line = line
                     
+                    # Grab line + next 4 lines
+                    snippet_lines = lines[i : i + 5]
+                    snippet_checked = " | ".join(snippet_lines)
+                    
+                    block_snippet = " ".join(snippet_lines).lower()
                     if "out of stock" in block_snippet:
                         is_available = False
                     else:
                         is_available = True
                     break
+
+            if matched_line:
+                print(f"[{friendly_name}] MATCH FOUND:")
+                print(f"  -> Title Line: '{matched_line}'")
+                print(f"  -> Block Checked: '{snippet_checked}'")
+            else:
+                print(f"[{friendly_name}] NO MATCH FOUND IN DOM")
 
             current_state[friendly_name] = is_available
             was_in_stock = previous_state.get(friendly_name, False)
@@ -139,22 +155,21 @@ def check_stock():
                 if not was_in_stock:
                     send_alert(friendly_name, is_instock=True)
                 else:
-                    print(f"[{friendly_name}] Still in stock (Alert suppressed)")
+                    print(f"  -> Evaluation: Still in stock (Alert suppressed)\n")
             else:
                 if was_in_stock:
                     send_alert(friendly_name, is_instock=False)
-                print(f"[{friendly_name}] Evaluated Out of Stock")
+                print(f"  -> Evaluation: Out of Stock\n")
 
-        # If zero models matched, log the raw lines captured so we can diagnose via GitHub Action logs
         if models_found_in_dom == 0:
-            print("\n[DIAGNOSTIC LOG DUMP] Top 40 lines of text found on page:")
+            print("\n[DIAGNOSTIC LOG DUMP] Top 40 lines captured on page:")
             for line in lines[:40]:
                 print(f"  -> {line}")
             send_error_alert("Could not find Steam Deck model keywords on page.")
             return
 
         if not stock_found:
-            print("\nAll refurbished models are currently out of stock.")
+            print("Final Status: All refurbished models are currently out of stock.")
 
         save_current_state(current_state)
 
