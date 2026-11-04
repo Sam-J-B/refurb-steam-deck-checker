@@ -10,7 +10,7 @@ if not NTFY_TOPIC:
     print("Error: NTFY_TOPIC environment variable is not set!")
     sys.exit(1)
 
-BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished"
+BUY_URL = "https://store.steampowered.com/sale/steamdeckrefurbished?cc=gb"
 STATE_FILE = "last_state.json"
 
 DECK_MODELS = {
