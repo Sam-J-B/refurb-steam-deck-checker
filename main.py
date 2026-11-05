@@ -129,15 +129,21 @@ def check_stock():
                     models_found_in_dom += 1
                     matched_line = line
                     
-                    # Grab line + next 4 lines
                     snippet_lines = lines[i : i + 5]
                     snippet_checked = " | ".join(snippet_lines)
-                    
                     block_snippet = " ".join(snippet_lines).lower()
+                    
+                    # 1. Explicitly check for Out of Stock first
                     if "out of stock" in block_snippet:
                         is_available = False
-                    else:
+                    # 2. Require positive confirmation for availability
+                    elif any(kw in block_snippet for kw in ["add to cart", "add to basket", "buy", "in stock", "available"]):
                         is_available = True
+                    # 3. Handle unhydrated/glitched DOM states safely
+                    else:
+                        print(f"  -> HYDRATION WARNING: Neither 'out of stock' nor stock buttons found for {friendly_name}.")
+                        print(f"     Raw block captured: '{snippet_checked}'")
+                        is_available = False
                     break
 
             if matched_line:
