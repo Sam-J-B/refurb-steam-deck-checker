@@ -105,7 +105,6 @@ def check_stock():
                     send_error_alert(f"Valve returned HTTP {response.status} for 3 consecutive checks.")
                 return
 
-
             page.wait_for_timeout(6000) 
             
             visible_text = page.locator("body").inner_text()
@@ -183,7 +182,9 @@ def check_stock():
         if not stock_found:
             print("Final Status: All refurbished models are currently out of stock.")
 
+                current_state["_consecutive_errors"] = 0
         save_current_state(current_state)
+
 
     except Exception as e:
         error_details = str(e).split('\n')[0]
