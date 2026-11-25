@@ -97,8 +97,14 @@ def check_stock():
             response = page.goto(BUY_URL, wait_until="networkidle", timeout=30000)
             
             if response and response.status not in [200, 304]:
-                send_error_alert(f"Valve returned bad HTTP status: {response.status}")
+                fail_count = previous_state.get("_consecutive_errors", 0) + 1
+                current_state["_consecutive_errors"] = fail_count
+                save_current_state(current_state)
+                print(f"HTTP {response.status} error (consecutive failure #{fail_count})")
+                if fail_count == 3:
+                    send_error_alert(f"Valve returned HTTP {response.status} for 3 consecutive checks.")
                 return
+
 
             page.wait_for_timeout(6000) 
             
