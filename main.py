@@ -182,7 +182,7 @@ def check_stock():
         if not stock_found:
             print("Final Status: All refurbished models are currently out of stock.")
 
-                current_state["_consecutive_errors"] = 0
+        current_state["_consecutive_errors"] = 0
         save_current_state(current_state)
 
 
